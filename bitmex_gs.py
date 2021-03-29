@@ -22,7 +22,7 @@ import sys
 
 def read_conf():
     param = {}
-    with open('Bitmex/bitmex.conf') as f:
+    with open('bitmex.conf') as f:
         for line in f:
             line = line.replace('\n', '')
             if len(line) > 0 and not line.startswith('#'):
@@ -31,6 +31,25 @@ def read_conf():
                 param[key] = value
     return param 
 
+
+# -------------------------------------------------------------------------
+# adjust time parameter from file config
+# -------------------------------------------------------------------------
+
+def adjust_time():
+    if param['time'] == '0' or param['time'][0:-1] == '0':
+        return 0
+
+    t = int(param['time'][0:-1])
+    t_type = param['time'][-1:] 
+    
+    if t_type == 'm':
+        t = t*60
+    elif t_type == 'h':
+        t = t*3600
+    else:
+        t = t
+    return t
 # -------------------------------------------------------------------------
 # Checking mandatory paramenters
 # -------------------------------------------------------------------------
@@ -66,7 +85,7 @@ def read_data(path):
 
     url = 'https://www.bitmex.com'+path
     req = urllib.request.Request(url, headers=headers)
-
+    # print(url)
     with urllib.request.urlopen(req) as f:
         bt_data = f.read()
     return bt_data
@@ -78,6 +97,7 @@ def read_data(path):
 def adjust_data(bt_data):
     bt_data = json.loads(bt_data)
     headline = []
+
     for key in bt_data[0]:
         headline.append(key)
     
@@ -101,17 +121,17 @@ def GS_interface():
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
     creds = None
-    if os.path.exists('Bitmex/token.json'):
+    if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file(
-            'Bitmex/token.json', SCOPES)
+            'token.json', SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                'Bitmex/credentials.json', SCOPES)
+                'credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
-        with open('Bitmex/token.json', 'w') as token:
+        with open('token.json', 'w') as token:
             token.write(creds.to_json())
 
     service = build('sheets', 'v4', credentials=creds)
@@ -125,16 +145,22 @@ def GS_interface():
 # API writing
 # -------------------------------------------------------------------------
 
-def write_code_GS(data, sheet, ss_ID, range):
+def write_code_GS(data, sheet, ss_ID, s_name, cell, clean_range):
     """ API writing """
     SAMPLE_SPREADSHEET_ID = ss_ID
-
+    
     body = {
         'values': data
     }
+    start_cell = f'{s_name}!{cell}'
+    range_to_clear = f'{s_name}!{clean_range}'
+        
+    resultClear = sheet.values().clear(spreadsheetId=SAMPLE_SPREADSHEET_ID, 
+                                                          range=range_to_clear,
+                                                          body={}).execute()
 
     result = sheet.values().update(spreadsheetId=SAMPLE_SPREADSHEET_ID,
-                                   range=range,
+                                   range=start_cell,
                                    valueInputOption='USER_ENTERED',
                                    body=body).execute()
     print('{} cells updated.'.format(result.get('updatedCells')))
@@ -143,7 +169,12 @@ def write_code_GS(data, sheet, ss_ID, range):
 if __name__ == '__main__':
     param = read_conf()
     check_paramenters()
-    bt_data = read_data(param['path'])
-    data = adjust_data(bt_data)
+    t = adjust_time()
     sheet = GS_interface()
-    write_code_GS(data, sheet, param['ss_ID'], param['range'])
+    while True:
+        bt_data = read_data(param['path'])
+        data = adjust_data(bt_data)
+        write_code_GS(data, sheet, param['ss_ID'], param['s_name'], param['cell'], param['clean_range'])
+        if t == 0:
+            break
+        time.sleep(int(t))
